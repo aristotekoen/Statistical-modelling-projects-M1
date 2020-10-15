@@ -1,0 +1,367 @@
+---
+title: "STA 212: Partie théorique"
+author: "Kahale Abdou Cadmos, Koen Aristote"
+date: "5/10/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Partie I 
+
+# Question 1
+```{r}
+rm(list = objects())
+df <- read.csv("oj.csv")
+```
+
+```{r,cache=TRUE}
+set.seed(123)
+train_index <- sample(1:nrow(df), size = 800, replace = FALSE )
+train <- df[train_index,]
+test <- df[-train_index,]
+library(corrplot)
+df_cor= df
+df_cor$Purchase=as.numeric(df_cor$Purchase)
+df_cor$Store7=as.numeric(df_cor$Store7)
+summary(train)
+corrplot(cor((df_cor)))
+```
+# Question 2
+```{r,warning=FALSE,message=FALSE,cache=TRUE}
+library(rpart)
+library(rpart.plot)
+library(caret)
+
+#CART sans élagages
+cart.0 <- rpart(Purchase~.,
+                data = train,
+                control = rpart.control(minsplit = 1, cp = 0, xval = 5))
+
+
+pred.0 <- predict(cart.0, test, type = "class")
+mean(test$Purchase!=pred.0) #[1] 0.256
+
+
+#matrice de confusion
+confusion_M.0 <- confusionMatrix(data = pred.0, reference = test$Purchase, dnn = c("Predicion.0", "test ref."))
+
+#matrice de confusion en proportions
+proportion_confusion_M.0= confusion_M.0$table/(confusion_M.0$table[,1]+ confusion_M.0$table[,2])
+
+
+## CART avec élagage sur le paramètre de complexité optimal
+cart.pruned <- prune(cart.0, cp = cart.0$cptable[which.min(cart.0$cptable[,"xerror"]),"CP"]) 
+
+#prediction 
+pred.pruned <- predict(cart.pruned, test,type="class")
+#erreur
+mean(pred.pruned!=test$Purchase) #0.17
+
+#matrice de confusion
+confusion_M.pruned <- confusionMatrix(data = pred.pruned, reference = test$Purchase, dnn = c("Predicion.prune", "test ref."))
+
+#matrice de confusion en proportion
+proportion_confusion_M.pruned=confusion_M.pruned$table/(confusion_M.pruned$table[,1]+confusion_M.pruned$table[,2])
+```
+
+
+```{r,message=FALSE, warning=FALSE}
+confusion_M.0
+confusion_M.pruned
+
+proportion_confusion_M.0 #meilleur classement de CH par le premier
+proportion_confusion_M.pruned #meilleur classement de MM pour le deuxième
+```
+
+
+On obtient une erreur de 0.26 sur l'arbre sans élagage vs 0.17 sur l'arbre avec elagage, donc une nette amélioration de la précision.
+
+ 
+
+# Question 3
+Tracons donc l'arbre élagué
+
+```{r, message=FALSE,warning=FALSE,cache=TRUE}
+rpart.plot(cart.pruned)
+```
+
+ L'arbre élagué est beaucoup plus court, on passe d'un large nombre de noeuds à moins de 10 noeuds. La diminution de l'erreur est du au fait que l'élagage a permis d'augmenter le biais mais de réduire la variance de l'arbre, permettant ainsi d'éviter le surapprentissage que l'on peut rencontrer lorsqu'on a un arbre trop profond. 
+
+Les informations décrites sur la feuille (MM,0.80,9%) nous disent que la classe prédite pour les observations dans la région où 0.28<=LoyalCH<0.5. MM  et PriceDiff>0.05 sont classées Minute Maid car c'est la classe majoritaire dans cette région. 0.80 nous donne la proportion d'observations du jeu d'apprentissage de classe MM dans la région. Enfin 9% signifie que 9% des observations du jeu de données d'apprentissage se trouve dans cette région. 
+ 
+Calculons l'importance relative des variables et traçons un barplot de l'importance des variables:
+
+```{r, message=FALSE,warning=FALSE}
+#importance relative
+cart.pruned$variable.importance/sum(cart.pruned$variable.importance)
+
+#plot de l'importance des variables 
+par(mfrow=c(1,1))
+barplot(rev(cart.pruned$variable.importance/sum(cart.pruned$variable.importance)),cex.names=0.4,horiz = T,las=1)
+```
+
+
+La variable la plus importantes dans la détermination de la classe est LoyalCH. Mais PriceDiff, StoreID et WeekofPurchase ont aussi une importance élevée. Il est normal que le prix de CH et MM soient proche derrière sachant qu'ils sont fortement corrélé à PriceDiff. Ainsi c'est la loyauté du client à une marque qui va être le plus déterminant pour savoir si un client va acheter un des deux jus. De plus, l'endroit où le jus est vendu ainsi que la différence de prix entre les jus sera aussi déterminante. Enfin la semaine du mois où le client fait son achat aussi, en effet peut être qu'en fin de mois les clients acheterons le moins cher! 
+
+
+
+# Partie 2: Forets Aléatoires
+
+## Questions 4,5,6,7
+```{r,cache=TRUE,message=FALSE,warning=FALSE}
+#chargement du jeu email
+email <- read.csv("email.csv")
+n<- length(email$word_freq_make)
+sample_id <- sample(1:nrow(email), size = 0.75*n, replace = FALSE)
+
+#séparation en test et train
+email_train <- email[sample_id,]
+email_test <- email[-sample_id,]  
+
+## arbre sans élagage
+email.tree= rpart(Class~.,data=email_train,control=c(minsplit=1,cp=0,xval=5))
+
+#paramètre de complexité optimal
+cpopt= which.min(email.tree$cptable[,"xerror"])
+
+#prediction et erreur
+pred.email.tree= predict(email.tree,email_test,type='class')
+mean(pred.email.tree!=email_test$Class) #[1] 0.08861859
+
+## arbre élagué
+email.pruned=prune(email.tree,cp=email.tree$cptable[which.min(email.tree$cptable[,"xerror"]),"CP"])
+rpart.plot(email.pruned)
+
+#prediction et erreur
+pred.email.pruned= predict(email.pruned,email_test,type='class')
+mean(pred.email.pruned!=email_test$Class) #[1] 0.07732407
+
+#On obtient un erreur de test de 7,8% pour l'arbre élagué contre 8.9% pour l'arbre sans élagage. 
+
+
+## Bagging 100 arbres:
+B=100
+predictions_bag = matrix(NA,nrow=nrow(email_test),ncol= B)
+predictions_bag= as.data.frame(predictions_bag)
+err_bootstrap = list()
+n_train= nrow(email_train)
+for(i in 1:100)
+  {
+    sample_index = sample(1:n_train,size=n_train,replace=TRUE)
+    bootstrap= email_train[sample_index,]
+    rpart_boot= rpart(Class~.,data = bootstrap,control=c(minsplit=1,cp=0,xval=5))
+    pred_bootstrap= predict(rpart_boot,email_test,type='class')
+    predictions_bag[,i]= (pred_bootstrap)
+    err_bootstrap[[i]]= mean(pred_bootstrap!=email_test$Class)
+}
+train_bootstrapped = predictions_bag
+
+#prediction bagging via seuillage sur la classe majoritaire
+pred.bootstrapped= train_bootstrapped==c("Spam")
+probas =apply(pred.bootstrapped,1,mean)
+
+probas[probas>0.5]= "Spam"
+probas[probas<=0.5]= "Non-spam"
+#erreur bagging
+mean((probas)!=email_test$Class) #[1] 0.06863597
+
+##On a réussi à diminuer l'erreur de prédiction grace au bootstrap
+
+
+## Random forest 
+library(doParallel)
+set.seed(123)
+cl <- makePSOCKcluster(5)
+registerDoParallel(cl)
+control <- trainControl(method="repeatedcv", number=5, repeats=5)
+rfGrid <-  expand.grid(mtry = 1:20)
+RFmodel <- train(Class~., data=email_test, method="rf", 
+                 trControl=control,
+                 ntree=100,tuneGrid=rfGrid,
+                 verbose=FALSE)
+stopCluster(cl)
+
+#plot de la précision en fonction du nombre de variables
+#considérées pour les splits 
+plot(RFmodel)
+
+#meilleur modèle obtenu par validation croisée sur mtry
+RFmodel$bestTune #mtry=5
+
+#prediction
+pred.rf.caret <- predict(RFmodel, email_test)
+
+#erreur
+mean(pred.rf.caret!=email_test$Class) 
+```
+Pour le bagging nous avons tiré 100 jeux de données de la même taille que le jeu d'apprentissage à partir du jeu d'apprentissage en tirant les observations par tirage avec remise. Ensuite pour chaque jeu nous ajustons un arbre sans élagage puis calculons la prediction Nous obtenons donc 100 prédictions pour le jeu test. Chaque observation test est classée en fonction de la classe majoritaire déterminée dans les 100 echantillons. On calcule ensuite l'erreur.
+
+Pour la forêt aléatoire on obtient par validation croisée le nombre optimal de variables à sélectionner pour effectuer les branchments sur les arbres de la forêt qui est égal à mtry=5.
+
+Voici les résultats des méthodes :
+
+\begin{tabular}{ |c|c|c|c|c| } 
+ \hline
+  & Arbre simple & Arbre élagué & Bootstrap & Random Forest\\
+ \hline
+ \hline
+ Erreur & 0.089 & 0.087 & 0.065 & 0.007 \\ 
+ \hline
+ \hline
+\end{tabular}
+
+
+Moins de 1% d'erreur avec la forêt aléatoire. Ainsi le plus mauvais modèle est celui par arbre non élagué puis celui par arbre élagagué, puis le bagging sur 100 arbres puis la random forest qui est bien plus précise que toutes les autres méthodes.
+
+
+# Partie 3: Bootstrap
+
+Les $\varepsilon\sim\mathcal{N}(0,1)$ on a que $Y_i\sim\mathcal{N}(\theta,1)$. Ainsi la vraisemblance vaut: 
+
+$$
+L(\theta;Y) = \prod_{i=1}^n \frac1{\sqrt{2\pi}}\exp \left(-\frac{\left(y_i - \theta\right)^2}{2}\right) \implies \log(L(\theta,Y)) = -n\log(\sqrt{2\pi}) - \frac12\sum_{i=1}^n \left(y_i-\theta\right)^2
+$$
+En dérivant la log vraisemblance on a:
+$$
+\frac{\delta}{\delta\theta}\log(L(\theta,Y))= \sum_{i=1}^n \left(y_i-\theta\right) \text{ qui s'annule en  } \hat\theta= \bar Y = \frac1n\sum_{i=1}^n y_i
+$$
+
+La dérivée seconde étant négative, $\hat\theta$ est l'EMV. De plus on a alors que $\hat\theta\sim\mathcal{N}(4,\frac1n)$
+
+
+```{r,cache=TRUE,message=FALSE,warning=FALSE}
+B=1000
+n = 100
+
+#on génère un echantillon iid de taille 100
+#N(4,1)
+Y = rnorm(100,4,1)
+
+#on génère B échantillons iid
+echants = replicate(B,rnorm(n,4,1))
+theta_hats=apply(echants,2,mean)
+
+#Calcul de la moyenne et variance empirique
+mean(theta_hats) # on retrouve bien environ 4 comme moyenne
+var(theta_hats)*((n-1)/n) # 1/100 pour la variance donc ok
+
+#histogramme des B theta_hats
+hist(theta_hats,proba=T)
+curve(dnorm(x,4,sqrt(0.01*((n-1)/n))),add=T,col='red') #notre estimateur suit en effet bien la loi N(4,1/n)
+
+shapiro.test(theta_hats) 
+#pvalue > 0.05 on conserve l'hypothèse que les données 
+#sont réparties normalement. 
+```
+
+```{r,cache=TRUE,warning=FALSE,message=FALSE}
+set.seed(123)
+#1000 echantillons de taille 100
+#tirés avec remise sur le jeu d'apprentissage
+echants_bootstrap= replicate(B,sample(Y,size = n,replace = TRUE))
+
+#moyenne de chaque echantillon= vecteur des estimateurs
+theta_hat_bootstrap= apply(echants_bootstrap,2,mean)
+
+#moyenne sur les estimateurs
+mean(theta_hat_bootstrap) 
+
+#on est moins proche de la valeur 
+#théorique de la moyenne de theta =4 qu'en ayant 1000 echantillons
+#iid simulés selon une n(4,1) mais on reste tout de même proche de 4
+
+ #De même pour la variance
+var(theta_hat_bootstrap)*((n-1)/n)
+
+hist(theta_hat_bootstrap,proba=T)
+curve(dnorm(x,4,sqrt(0.01)),add=T,col='blue')
+```
+   
+On observe un plus grand biais par rapport à la moyenne théorique de l'estimateur de theta à travers cette méthode, en effet l'histogramme est centré autour de 4.091 vs 3.9989 précedemment. On observe que la méthode permet de bien estimer la variance de l'estimateur qui reste très proche de sa valeur théorique de 0.01 et ne varie pas beaucoup par rapport à la première simulation. 
+
+# Partie 4: Boosting et Gradient Boosting
+
+# Question 10
+```{r}
+#On complète le tableau donné dans le sujet dans le dataframe:
+df=data.frame("c_hat"=c(0.3,-0.2,1.5,-4.3),"y_hat"=rep(NA,4),
+              "perte_exp"=rep(NA,4),"perte_binaire"=rep(NA,4)
+              ,"y_star" = c(-1,-1,1,1))
+
+df$y_hat= as.numeric(df$c_hat>=0) - as.numeric(df$c_hat<0)
+df$perte_exp = exp(-df$y_star*df$c_hat)
+df$perte_binaire = as.numeric(df$y_hat!=df$y_star)
+df
+```
+
+La perte exponentielle est plus informative sur l'écart entre c_hat et 0. En effet la classification -1,1 est établie par rapport au signe de $\hat c$, ainsi si la classification est correcte, c'est à dire $\hat cy^*>=0$, plus $\hat c$ sera très positif dans le cas où $y^*=1$ plus la perte exponentielle prendra des valeurs faibles et de manière similaire dans les cas où $y^*=-1$, plus $\hat c$ prendra des valeurs très négatives, plus la quantité $\hat cy^*$ sera grande et donc la perte sera plus faible. 
+Dans le cas où la classification n'est pas correcte, c'est à dire $\hat cy^*<0$ plus $\hat c(x)$ est très éloigné de 0, c'est à dire $-\hat c(x)y^*>>0$, et donc plus grande sera la perte exponentielle. 
+Ainsi la perte exponentielle peut être plus informative sur la significativité de la classification. En effet, si on est proche de zéro pour $\hat c(x)$ on est moins certain que la classification est correcte à partir des données vu que la classification binaire se fait sur le signe. 
+
+De plus l'avantage de cette fonction de perte est sa convexité en $\hat c(x)$.
+
+Cette information peut donc être utilisée pour affecter les nouveaux poids aux observations mal prédites. Celles qui ont été mal prédites avec une grande certitude se verront donner un plus grand poids. 
+
+On le voit bien sur le tableau ci dessus. Pour $\hat c(x) =-4.3$ alors que $y^*=1$ on a une perte de 73 tandis que pour $\hat c(x) =0.3$ alors que $y^*=-1$ la perte est de 1.34.
+
+# Question 11
+
+```{r,cache=TRUE,message=FALSE,warning=FALSE}
+###Adaboost
+library(ada)
+
+?ada
+
+##algorithme original adaboost
+ada.0 <- ada(Class~., data = email_train, loss = "exponential", 
+             iter = 50,type="discrete",bag.frac=0,nu=1)
+
+print(ada.0)
+
+#prediction
+pred.ada.0 <- predict(ada.0, email_test)
+
+#erreur
+mean(email_test$Class!=pred.ada.0)
+
+
+```
+
+Ici loss= exponential correspond à la fonction de perte $\ell (Y,g)= \exp(-yg)$ pour laquelle on souhaite minimiser la somme sur les différents classifieurs.$nu=1$ correspond à l'initialisation du pas de la descente de gradient et pour 1, cela correspond quasiment à Adaboost.M1. Bag.frac est un paramètre de bootstrap qui améliore la performance de l'algorithme et que nous n'utiliserons pas car pas utilisé dans l'algorithme original.
+
+On obtient une erreur de l'ordre de 4% avec Adaboost. 
+
+## Question 12
+
+Prenons le jeu de données oj qui a moins d'observations. Si on fixe $\lambda$ et qu'on essaye d'ajuster une règle de classification par xgboost pour différents nombres d'itérations:
+```{r,cache=TRUE,message=FALSE}
+library(caret)
+library(xgboost)
+
+#validation croisée répetée sur les hyperparamètres M,lambda
+control=trainControl(method = "repeatedcv", number =5,repeats=3)
+grid = expand.grid(nrounds=c(5,10,15,25,50,75,100,150,200),eta=c(0.01,0.1,1),gamma=0,max_depth = 4,subsample = 1,  min_child_weight = 1.,colsample_bytree = 1)
+
+#apprentissage par xgboost
+xgboost.oj <- train(Purchase~., data = train,method="xgbTree",tuneGrid=grid)
+
+#illustration de la relation entre M et lambda
+par(mfrow=c(1,1))
+plot(xgboost.oj)
+```
+
+
+Dans le plot ci dessus nous avons entrainé un modèle pour le jeu de données oj qui contient moins de données afin d'avoir un temps de calcul rapide avec xgboost sur plusieurs valeurs du nombre d'itérations et plusieurs valeurs de lambda 0.01, 0.1et 1. donc des valeurs extrêmes et une valeur plus raisonnable.
+
+On a vu théoriquement que dans le cadre du boosting, un trop grand nombre d'itérations crée du surapprentissage et un trop petit nombre du sous apprentissage à cause d'un biais élevé:
+$$L (\hat g_M) \leq L_n (\hat g_M) + \mathcal{O}\left(
+ \sqrt{\frac{MV}{n}}\right)$$
+ 
+De plus lors de l'utilisation d'une descente de gradient pour minimiser L, on a vu que plus lambda est grand moins le nombre d'itération est nécessaire pour obtenir la meilleur précision et vice versa. Voici une illustration de ce résultat sur le jeu de données oj.
+
+En effet plus $\lambda$ est petit, plus la précision maximale est atteinte en un nombre d'itération plus grand. On observe aussi sur les courbes associées aux $\lambda$ atteignant un maximum, qu'après le nombre d'itération optimal, que pour les M superieurs à celui en lequel la meilleure précision est atteinte, la précision décroit . On ne le voit pas sur la courbe associée à $\lambda= 0.01$ car par souci de lisibilité nous avons limité M jusqu'à $M_max=200$ mais en testant pour $M=300:1000$ on a bien une décroissance de la précision à partir du M_opt. 
